@@ -21,7 +21,9 @@ short_description: register a task definition in ecs
 description:
     - Creates or terminates task definitions
 version_added: "2.0"
-author: Mark Chance(@Java1Guy)
+author:
+    - "Mark Chance (@java1guy)"
+    - "Zac Blazic (@zacblazic)"
 requirements: [ json, boto, botocore, boto3 ]
 options:
     state:
@@ -44,7 +46,7 @@ options:
         type: int
     containers:
         description:
-            - A list of containers definitions 
+            - A list of containers definitions
         required: False
         type: list of dicts with container definitions
     volumes:
@@ -95,6 +97,67 @@ taskdefinition:
     description: a reflection of the input parameters
     type: dict inputs plus revision, status, taskDefinitionArn
 '''
+
+CONTAINER_TYPE_MAP = {
+    'name': 'str',
+    'image': 'str',
+    'cpu': 'int',
+    'memory': 'int',
+    'memory_reservation': 'int',
+    'links': [ 'str' ],
+    'port_mappings': {
+        'host_port': 'int',
+        'container_port': 'int',
+        'protocol': 'str'
+    },
+    'essential': 'bool',
+    'entry_point': [ 'str' ],
+    'command': [ 'str' ],
+    'environment': [{
+        'name': 'str',
+        'value': 'str'
+    }],
+    'mount_points': [{
+       'source_volume': 'str',
+       'container_path': 'str',
+       'read_only': 'bool'
+    }],
+    'volumes_from': [{
+        'source_container': 'str',
+        'read_only': 'bool'
+    }],
+    'hostname': 'str',
+    'user': 'str',
+    'working_directory': 'str',
+    'disable_networking': 'bool',
+    'privileged': 'bool',
+    'readonly_root_filesystem': 'bool',
+    'dns_servers': [ 'str' ],
+    'dns_search_domains': [ 'str' ],
+    'extra_hosts': [{
+        'hostname': 'str',
+        'ip_address': 'str'
+    }],
+    'docker_security_options': [ 'str' ],
+    'docker_labels': {},
+    'ulimits': [{
+        'name': 'str',
+        'soft_limit': 'int',
+        'hard_limit': 'int'
+    }],
+    'log_configuration': {
+        'log_driver': 'str',
+        'options': {}
+    }
+}
+
+VOLUME_TYPE_MAP = {
+  'name': 'str',
+  'host': {
+    'source_path': 'str'
+  }
+}
+
 try:
     import boto
     import botocore
@@ -111,6 +174,49 @@ except ImportError:
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.ec2 import boto3_conn, ec2_argument_spec, get_aws_connection_info
 
+class TypeMapper:
+    def map_complex_type(self, complex_type, type_map):
+        if not complex_type:
+            return
+        new_type = type(complex_type)()
+        if isinstance(complex_type, dict):
+            for key in complex_type:
+                if key in type_map:
+                    if isinstance(type_map[key], list):
+                        new_type[key] = self.map_complex_type(
+                            complex_type[key],
+                            type_map[key][0])
+                    else:
+                        new_type[key] = self.map_complex_type(
+                            complex_type[key],
+                            type_map[key])
+                else:
+                    return complex_type
+        elif isinstance(complex_type, list):
+            for i in range(len(complex_type)):
+                new_type.append(self.map_complex_type(
+                    complex_type[i],
+                    type_map))
+        elif type_map:
+            return vars(globals()['__builtins__'])[type_map](complex_type)
+        return new_type
+
+    def camelize(self, complex_type):
+        if not complex_type:
+            return
+        new_type = type(complex_type)()
+        if isinstance(complex_type, dict):
+            for key in complex_type:
+                new_type[self.camel(key)] = self.camelize(complex_type[key])
+        elif isinstance(complex_type, list):
+            for i in range(len(complex_type)):
+                new_type.append(self.camelize(complex_type[i]))
+        else:
+            return complex_type
+        return new_type
+
+    def camel(self, words):
+        return words.split('_')[0] + ''.join(x.capitalize() or '_' for x in words.split('_')[1:])
 
 class EcsTaskManager:
     """Handles ECS Tasks"""
@@ -191,6 +297,7 @@ def main():
 
     task_to_describe = None
     task_mgr = EcsTaskManager(module)
+    type_mapper = TypeMapper()
     results = dict(changed=False)
 
     if module.params['state'] == 'present':
@@ -201,7 +308,14 @@ def main():
             module.fail_json(msg="To use task definitions, a family must be specified")
 
         family = module.params['family']
-        existing_definitions_in_family = task_mgr.describe_task_definitions(module.params['family'])
+        existing_definitions_in_family = task_mgr.describe_task_definitions(family)
+
+        containers = type_mapper.map_complex_type(module.params['containers'], CONTAINER_TYPE_MAP)
+        containers = type_mapper.camelize(containers)
+
+        volumes = module.params.get('volumes', []) or []
+        volumes = type_mapper.map_complex_type(volumes, VOLUME_TYPE_MAP)
+        volumes = type_mapper.camelize(volumes)
 
         if 'revision' in module.params and module.params['revision']:
             # The definition specifies revision. We must gurantee that an active revision of that number will result from this.
@@ -290,9 +404,7 @@ def main():
 
             # No revision explicitly specified. Attempt to find an active, matching revision that has all the properties requested
             for td in existing_definitions_in_family:
-                requested_volumes = module.params.get('volumes', []) or []
-                requested_containers = module.params.get('containers', []) or []
-                existing = _task_definition_matches(requested_volumes, requested_containers, td)
+                existing = _task_definition_matches(volumes, containers, td)
 
                 if existing:
                     break
@@ -303,9 +415,7 @@ def main():
         else:
             if not module.check_mode:
                 # Doesn't exist. create it.
-                volumes = module.params.get('volumes', []) or []
-                results['taskdefinition'] = task_mgr.register_task(module.params['family'],
-                                                                   module.params['containers'], volumes)
+                results['taskdefinition'] = task_mgr.register_task(family, containers, volumes)
             results['changed'] = True
 
     elif module.params['state'] == 'absent':
