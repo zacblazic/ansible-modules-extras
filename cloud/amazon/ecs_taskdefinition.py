@@ -17,43 +17,45 @@
 DOCUMENTATION = '''
 ---
 module: ecs_taskdefinition
-short_description: register a task definition in ecs
+short_description: Manages task definitions on ECS
 description:
-    - Creates or terminates task definitions
+    - Registers or deregisters task definitions.
 version_added: "2.0"
 author:
-    - "Mark Chance (@java1guy)"
+    - "Mark Chance(@Java1Guy)"
     - "Zac Blazic (@zacblazic)"
 requirements: [ json, boto, botocore, boto3 ]
 options:
     state:
         description:
-            - State whether the task definition should exist or be deleted
+            - Whether to register or deregister the task definition.
         required: true
         choices: ['present', 'absent']
     arn:
         description:
-            - The arn of the task description to delete
+            - The ARN of the task definition to deregister.
         required: false
+        default: null
     family:
         description:
-            - A Name that would be given to the task definition
+            - The family name of the task definition.
         required: false
+        default: null
     revision:
         description:
-            - A revision number for the task definition
-        required: False
-        type: int
+            - The revision number of the task definition.
+        required: false
+        default: null
     containers:
         description:
-            - A list of containers definitions
-        required: False
-        type: list of dicts with container definitions
+            - A list of containers definitions.
+        required: false
+        default: null
     volumes:
         description:
-            - A list of names of volumes to be attached
-        required: False
-        type: list of name
+            - A list of volumes to be attached.
+        required: false
+        default: null
 extends_documentation_fragment:
     - aws
     - ec2
@@ -63,38 +65,35 @@ EXAMPLES = '''
 - name: "Create task definition"
   ecs_taskdefinition:
     containers:
-    - name: simple-app
-      cpu: 10
+    - name: app
+      image: "alpine"
+      cpu: 128
+      memory: 256
       essential: true
-      image: "httpd:2.4"
-      memory: 300
-      mountPoints:
-      - containerPath: /usr/local/apache2/htdocs
-        sourceVolume: my-vol
-      portMappings:
-      - containerPort: 80
-        hostPort: 80
-    - name: busybox
-      command:
-        - "/bin/sh -c \"while true; do echo '<html> <head> <title>Amazon ECS Sample App</title> <style>body {margin-top: 40px; background-color: #333;} </style> </head><body> <div style=color:white;text-align:center> <h1>Amazon ECS Sample App</h1> <h2>Congratulations!</h2> <p>Your application is now running on a container in Amazon ECS.</p>' > top; /bin/date > date ; echo '</div></body></html>' > bottom; cat top date bottom > /usr/local/apache2/htdocs/index.html ; sleep 1; done\""
-      cpu: 10
-      entryPoint:
-      - sh
-      - "-c"
-      essential: false
-      image: busybox
-      memory: 200
-      volumesFrom:
-      - sourceContainer: simple-app
+      port_mappings:
+      - container_port: 3000
+        host_port: 80
+      links:
+      - db
+    - name: db
+      image: "postgres"
+      cpu: 128
+      memory: 256
+      essential: true
+      mount_points:
+      - source_volume: "db-data"
+        container_path: "/data"
+        read_only: false
     volumes:
-    - name: my-vol
-    family: test-cluster-taskdef
+    - name: db-data
+    family: "app"
     state: present
-  register: task_output
+  register: task_definition
 '''
+
 RETURN = '''
-taskdefinition:
-    description: a reflection of the input parameters
+task_definition:
+    description: A reflection of the input parameters
     type: dict inputs plus revision, status, taskDefinitionArn
 '''
 
