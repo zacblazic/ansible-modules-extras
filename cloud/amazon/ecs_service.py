@@ -239,7 +239,7 @@ from ansible.module_utils.ec2 import boto3_conn, ec2_argument_spec, get_aws_conn
 
 class TypeMapper:
     def map_complex_type(self, complex_type, type_map):
-        if not complex_type:
+        if complex_type is None:
             return
         new_type = type(complex_type)()
         if isinstance(complex_type, dict):
@@ -265,7 +265,7 @@ class TypeMapper:
         return new_type
 
     def camelize(self, complex_type):
-        if not complex_type:
+        if complex_type is None:
             return
         new_type = type(complex_type)()
         if isinstance(complex_type, dict):
